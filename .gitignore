@@ -31,9 +31,10 @@ ENV/
 # Data
 *.parquet
 *.pkl
-*.joblib
 *.model
+*.joblib
 *.csv
+recipes_extended.csv  # large raw data (285 MB)
 data/
 output/
 
