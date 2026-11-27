@@ -6,12 +6,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import MultiLabelBinarizer
 
+import config as cfg
 from config import (
     GENERIC_WORDS, STAPLES, RANDOM_STATE, N_JOBS,
     ingredient_keys, to_features, load_data,
-    recipe_ingredients, vocab, vocab_set, ingredient_index, key_index,
-    ingredient_keys_matrix, recipe_ingredients_matrix, recipe_lengths,
-    idf, ingredient_frequency,
 )
 
 
@@ -24,7 +22,7 @@ class ItalianRecipeRecommender:
         self.recipes_: list[list[str]] = None
         self.vectorizer_: TfidfVectorizer = None
         self.item_matrix_: csr_matrix = None
-        self.binarizer_ = MultiLabelBinarizer(classes=vocab)
+        self.binarizer_ = MultiLabelBinarizer(classes=cfg.vocab)
         self.recipe_binary_: csr_matrix = None
         self.knn_jaccard_: NearestNeighbors = None
 
@@ -70,11 +68,11 @@ class ItalianRecipeRecommender:
 # M0: Exact ingredient overlap (binary)
 def overlap_top_k(queries: list[list[str]], k: int = 10) -> np.ndarray:
     load_data()
-    binarizer = MultiLabelBinarizer(classes=vocab)
-    recipe_binary = binarizer.fit_transform(recipe_ingredients).astype(bool)
+    binarizer = MultiLabelBinarizer(classes=cfg.vocab)
+    recipe_binary = binarizer.fit_transform(cfg.recipe_ingredients).astype(bool)
 
     def binary_queries(qs):
-        return binarizer.transform([[x for x in q if x in vocab_set] for q in qs]).astype(bool)
+        return binarizer.transform([[x for x in q if x in cfg.vocab_set] for q in qs]).astype(bool)
 
     shared = binary_queries(queries).astype(float) @ recipe_binary.T.astype(float)
     # Tie-break: shorter recipes first
@@ -88,12 +86,12 @@ def knn_jaccard_top_k(queries: list[list[str]], k: int = 10) -> np.ndarray:
     global knn_jaccard
     load_data()
     if knn_jaccard is None:
-        binarizer = MultiLabelBinarizer(classes=vocab)
-        recipe_binary = binarizer.fit_transform(recipe_ingredients).astype(bool)
+        binarizer = MultiLabelBinarizer(classes=cfg.vocab)
+        recipe_binary = binarizer.fit_transform(cfg.recipe_ingredients).astype(bool)
         knn_jaccard = NearestNeighbors(metric="jaccard", algorithm="brute").fit(recipe_binary)
 
     def binary_queries(qs):
-        return binarizer.transform([[x for x in q if x in vocab_set] for q in qs]).astype(bool)
+        return binarizer.transform([[x for x in q if x in cfg.vocab_set] for q in qs]).astype(bool)
 
     return knn_jaccard.kneighbors(binary_queries(queries), n_neighbors=k, return_distance=False)
 
@@ -101,8 +99,9 @@ def knn_jaccard_top_k(queries: list[list[str]], k: int = 10) -> np.ndarray:
 # Default optimized M2/M3 model (parameters from notebook grid search)
 def get_m3_best() -> ItalianRecipeRecommender:
     # Best params from notebook: mode="both", use_idf=True, drop_staples=False, alpha=0.6
+    load_data()  # Ensure data is loaded
     model = ItalianRecipeRecommender(mode="both", use_idf=True, drop_staples=False, alpha=0.6)
-    model.fit(recipe_ingredients)
+    model.fit(cfg.recipe_ingredients)
     return model
 
 

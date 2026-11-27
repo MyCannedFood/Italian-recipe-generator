@@ -107,9 +107,11 @@ def make_queries(
 def candidate_features(queries: list[list[str]], targets: np.ndarray, n_candidates: int = 50) -> pd.DataFrame:
     from config import (
         recipe_ingredients, vocab, vocab_set, ingredient_keys, idf,
-        recipe_item_keys, recipe_key_sets, recipe_idf, recipe_tabular,
         ingredient_index, key_index, ingredient_keys_matrix, recipe_ingredients_matrix,
-        N_CANDIDATES
+        N_CANDIDATES, load_data,
+    )
+    from features import (
+        recipe_item_keys, recipe_key_sets, recipe_idf, recipe_tabular,
     )
     from recommender import get_m3_best, ItalianRecipeRecommender
     from sklearn.preprocessing import MultiLabelBinarizer

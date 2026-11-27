@@ -168,6 +168,44 @@ def load_data() -> None:
     n_recipes = len(recipe_ingredients)
     idf = {item: np.log(n_recipes / count) for item, count in ingredient_frequency.items()}
 
+    # --- Derived columns (matching notebook preprocessing) ---
+    # dish_group from subcategory/category
+    if "dish_group" not in recipes.columns:
+        # Map subcategory to dish group
+        subcat_to_group = {
+            "Antipasti": "Antipasti", "Antipasto": "Antipasti", "Bruschetta": "Antipasti",
+            "Biscotti": "Dessert", "Calzones": "Pizza", "Chicken Parmesan": "Chicken",
+            "Eggplant Parmesan": "Vegetarian", "Fettuccini": "Pasta", "Frittatas": "Eggs",
+            "Gnocchi": "Pasta", "Homemade Pasta": "Pasta", "Lasagna": "Pasta",
+            "Meat Lasagna": "Pasta", "Chicken Lasagna": "Pasta", "Spinach Lasagna": "Pasta",
+            "Vegetarian Lasagna": "Pasta", "Zucchini Lasagna": "Pasta", "Eggplant Lasagna": "Pasta",
+            "Linguine": "Pasta", "Manicotti": "Pasta", "Italian Meatballs": "Meat",
+            "Minestrone Soups": "Soup", "Pasta Carbonara": "Pasta", "Pasta Primavera": "Pasta",
+            "Pestos": "Sauce", "Pizza": "Pizza", "Pepperoni Pizza": "Pizza", "Veggie Pizza": "Pizza",
+        }
+        def map_dish_group(row):
+            subcat = str(row.get("subcategory", "")).strip()
+            if subcat in subcat_to_group:
+                return subcat_to_group[subcat]
+            cat = str(row.get("category", "")).strip()
+            if cat == "Italian":
+                return "Other"
+            return "Other"
+        recipes["dish_group"] = recipes.apply(map_dish_group, axis=1)
+
+    # n_steps from num_steps
+    if "n_steps" not in recipes.columns and "num_steps" in recipes.columns:
+        recipes["n_steps"] = pd.to_numeric(recipes["num_steps"], errors="coerce").fillna(0).astype(int)
+
+    # Ensure est_prep_time_min and est_cook_time_min are numeric
+    for col in ["est_prep_time_min", "est_cook_time_min"]:
+        if col in recipes.columns:
+            recipes[col] = pd.to_numeric(recipes[col], errors="coerce")
+
+    # Ensure difficulty is string
+    if "difficulty" in recipes.columns:
+        recipes["difficulty"] = recipes["difficulty"].fillna("Unknown").astype(str).str.strip().str.title()
+
 
 def singularize(name: str) -> str:
     """Singularisasi sederhana pada kata terakhir (tomatoes -> tomato, leaves -> leaf)."""

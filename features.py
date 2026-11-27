@@ -11,6 +11,9 @@ from config import (
 )
 from recommender import get_m3_best, ItalianRecipeRecommender
 
+# Ensure data is loaded
+load_data()
+
 
 # Pre-computed recipe metadata for features
 recipe_item_keys = [[ingredient_keys(item) for item in items] for items in recipe_ingredients]

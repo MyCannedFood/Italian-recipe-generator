@@ -1,10 +1,9 @@
-numpy
 pandas
+numpy
 scipy
 scikit-learn
 xgboost
-matplotlib
-seaborn
-joblib
 streamlit
-tqdm
+joblib
+pytest
+pytest-cov
