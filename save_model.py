@@ -12,7 +12,8 @@ from config import (
 )
 from recommender import get_m3_best
 from models import get_tuned_models, XGBQueryRanker
-from features import candidate_features, compute_m4_features
+from utils import candidate_features
+from features import compute_m4_features
 from utils import make_queries, f1_optimal_threshold, ranking_metrics
 
 

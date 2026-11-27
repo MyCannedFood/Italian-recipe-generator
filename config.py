@@ -1,5 +1,7 @@
 from pathlib import Path
 import json
+import re
+import unicodedata
 import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
@@ -16,9 +18,52 @@ GENERIC_WORDS = {
 
 STAPLES = {"salt", "black pepper", "water", "cooking spray"}
 
+# --- clean_ingredients_v2 constants (from notebook Cell 6) ---
+FRACTIONS = "¼½¾⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞"
+UNITS = (
+    "cups?|tablespoons?|tbsps?|teaspoons?|tsps?|ounces?|oz|pounds?|lbs?|"
+    "grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|quarts?|qt|pints?|"
+    "pinch(?:es)?|dash(?:es)?|handfuls?|sprigs?|sticks?|stalks?|slices?|pieces?|"
+    "cans?|packages?|packets?|envelopes?|jars?|bottles?|containers?|cartons?|"
+    "boxes|box|bags?|bunch(?:es)?|heads?|inch(?:es)?|fluid|balls?|links?|loaf|loaves"
+)
+PREPARATION = (
+    "chopped|diced|minced|sliced|crushed|grated|shredded|freshly|finely|roughly|"
+    "coarsely|thinly|lightly|peeled|seeded|deseeded|drained|rinsed|divided|optional|"
+    "beaten|softened|melted|cubed|halved|quartered|julienned|torn|trimmed|packed|"
+    "zested|juiced|cooked|uncooked|thawed|frozen|toasted|boneless|skinless|"
+    "fresh|large|small|medium|canned|whole|ripe|hulled|extra lean|lean|bite sized|"
+    "to taste|at room temperature|room temperature|for dredging|cut into"
+)
+# "ground" dibuang untuk bumbu, tapi dipertahankan untuk daging (ground beef ≠ beef)
+GROUND_NOT_MEAT = r"\bground\b(?!\s+(?:beef|pork|turkey|chicken|lamb|veal|sausage))"
+PASTA_NAMES = {
+    "spaghetti", "penne", "rigatoni", "fettuccine", "fettuccini", "linguine",
+    "macaroni", "manicotti", "fusilli", "farfalle", "tagliatelle", "orzo",
+    "lasagna noodle", "lasagne noodle", "lasagna", "ziti", "rotini", "orecchiette",
+}
+ALIASES = {
+    "extra virgin olive oil": "olive oil", "virgin olive oil": "olive oil",
+    "kosher salt": "salt", "sea salt": "salt", "table salt": "salt",
+    "parmesan cheese": "parmesan", "parmigiano reggiano": "parmesan",
+    "parmigiano reggiano cheese": "parmesan",
+    "mozzarella cheese": "mozzarella", "ricotta cheese": "ricotta",
+    "all purpose flour": "flour", "pepper": "black pepper",
+    "unsalted butter": "butter", "salted butter": "butter",
+    "dried basil leaf": "dried basil", "scallion": "green onion", "spring onion": "green onion",
+}
+# Salah ketik yang ditemukan di data mentah (huruf pertama hilang saat scraping)
+DATA_TYPOS = {"armesan": "parmesan", "oma": "roma", "enoa": "genoa"}
+NO_SINGULAR = {"asparagus", "couscous", "molasses", "hummus", "swiss", "gnocchi", "lees"}
+
+SALT_PEPPER = re.compile(r"(?:salt and (?:black )?pepper|(?:black )?pepper and salt)")
+
 RANDOM_STATE = 42
 N_JOBS = 2
 N_CANDIDATES = 50
+
+# Dataset integrity check
+dataset_sha256 = "cba06a7cfbb1fdf7d1e3915191fc99e42d6cbf21ed6e486858c04b5971b674d8"
 
 # M4 feature columns 
 ML_NUMERIC = [
@@ -124,15 +169,64 @@ def load_data() -> None:
     idf = {item: np.log(n_recipes / count) for item, count in ingredient_frequency.items()}
 
 
+def singularize(name: str) -> str:
+    """Singularisasi sederhana pada kata terakhir (tomatoes -> tomato, leaves -> leaf)."""
+    words = name.split()
+    last = words[-1]
+    if last in NO_SINGULAR or len(last) <= 3:
+        return name
+    if re.search(r"(?:tomato|potato)es$", last):
+        last = last[:-2]
+    elif re.search(r"(?:ch|sh|x)es$", last):
+        last = last[:-2]
+    elif last.endswith("ies"):
+        last = last[:-3] + "y"
+    elif last.endswith("leaves"):
+        last = last[:-6] + "leaf"
+    elif re.search(r"[^su]s$", last):
+        last = last[:-1]
+    return " ".join(words[:-1] + [last])
+
+
+def normalize_ingredient_v2(value: str) -> str:
+    name = re.sub(r"[\w'’]+\s*[®™]", " ", str(value))                  # merek dagang: Hellmann's®
+    name = unicodedata.normalize("NFKD", name)
+    name = name.encode("ascii", "ignore").decode().lower()          # jalapeño -> jalapeno
+    name = re.sub(r"\([^)]*\)", " ", name)                           # (8 ounce)
+    name = re.split(r",|\s-\s|\bwith\b", name)[0]                      # buang catatan setelah koma / ' - ' / with
+    name = re.split(r"\b(?:such as|plus more|for)\b", name)[0]          # for garnish/serving/frying
+    name = re.sub(rf"[{FRACTIONS}]", " ", name)
+    name = re.sub(r"\d+(?:[./]\d+)?\s*(?:to|or|-)\s*(?=\d)", " ", name)   # rentang: 1 to 2, 1 or 2, 2-3
+    name = re.sub(r"\d+(?:[./-]\d+)?(?:\s*-\s*inch(?:es)?)?", " ", name)  # 1, 1/2, 1.5, 1-inch
+    name = re.sub(r"\bcloves?\s+(?:of\s+)?(?=garlic\b)", " ", name)  # cloves garlic -> garlic
+    name = re.sub(r"\b(garlic)\s+cloves?\b", r"\1", name)            # garlic cloves -> garlic
+    name = re.sub(rf"\b(?:{UNITS})\b\.?", " ", name)
+    name = name.replace("-", " ")
+    name = re.sub(r"\b(?:warm|hot|cold|lukewarm|boiling|ice)\s+(?=water\b)", " ", name)
+    name = re.sub(GROUND_NOT_MEAT, " ", name)
+    name = re.sub(rf"\b(?:{PREPARATION})\b", " ", name)
+    name = re.sub(r"[^a-z\s]", " ", name)                            # tanda baca & hyphen -> spasi
+    name = next((part for part in re.split(r"\bor\b", name) if part.strip()), "")  # butter or margarine -> butter
+    name = re.sub(r"^(?:\s*(?:of|and|a|an)\b)+|\b(?:of|and)\s*$", " ", name)
+    name = re.sub(r"\b(?!bay\b)(\w+)\s+lea(?:f|ves)$", r"\1", name)  # basil leaves -> basil
+    name = re.sub(r"\b(?:%s)\b" % "|".join(DATA_TYPOS), lambda m: DATA_TYPOS[m.group()], name)
+    name = re.sub(r"\s+", " ", name).strip()
+    if not name:
+        return ""
+    name = singularize(name)
+    name = ALIASES.get(name, name)
+    if name in PASTA_NAMES or name.endswith(" pasta"):
+        return "pasta"
+    return name
+
+
 def clean_ingredients_v2(raw: list[str]) -> list[str]:
-    """Normalize user pantry input (same regex as notebook)."""
-    import re
+    """Normalize user pantry input (full notebook implementation)."""
     cleaned = []
-    for x in raw:
-        x = x.lower().strip()
-        x = re.sub(r"^(\d+\.?\d*\s*)?(cups?|tbsp|tsp|grams?|g|kg|oz|lb|ml|l|pinch|dash|clove|slice|piece)s?\s+", "", x)
-        x = re.sub(r"[^a-z0-9\s-]", "", x)
-        x = re.sub(r"\s+", " ", x).strip()
-        if x and x not in STAPLES:
-            cleaned.append(x)
-    return cleaned
+    for value in raw:
+        name = normalize_ingredient_v2(value)
+        if SALT_PEPPER.fullmatch(re.sub(r"\b(?:kosher|sea)\s+", "", name)):
+            cleaned.extend(["salt", "black pepper"])
+        elif name:
+            cleaned.append(name)
+    return list(dict.fromkeys(cleaned))
