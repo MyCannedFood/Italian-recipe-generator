@@ -115,25 +115,59 @@ def candidate_features(queries: list[list[str]], targets: np.ndarray, n_candidat
     )
     from recommender import get_m3_best, ItalianRecipeRecommender
     from sklearn.preprocessing import MultiLabelBinarizer
+    from tqdm import tqdm
     import numpy as np
     
     m3_best = get_m3_best()
     m2_default = ItalianRecipeRecommender(mode="ingredient", use_idf=True, drop_staples=False, alpha=1.0)
     m2_default.fit(recipe_ingredients)
     
-    m3_scores = m3_best.score(queries)
-    cos_both = (m3_best.vectorizer_.transform(queries) @ m3_best.item_matrix_.T).toarray()
-    cos_ingredient = m2_default.score(queries)
+    # Batch processing to avoid OOM on large query sets
+    batch_size = 500
+    n_queries = len(queries)
+    
+    m3_score_chunks = []
+    cos_both_chunks = []
+    cos_ingredient_chunks = []
+    exact_overlap_chunks = []
+    
+    print(f"Computing similarities for {n_queries} queries (batch_size={batch_size})...")
     
     binarizer = MultiLabelBinarizer(classes=vocab)
     recipe_binary = binarizer.fit_transform(recipe_ingredients).astype(bool)
-    query_binary = binarizer.transform([[x for x in q if x in vocab_set] for q in queries]).astype(bool)
-    exact_overlap = (query_binary @ recipe_binary.T).astype(float)
+    
+    for start in tqdm(range(0, n_queries, batch_size), desc="Batches"):
+        end = min(start + batch_size, n_queries)
+        batch_queries = queries[start:end]
+        
+        # M3 scores
+        m3_score_chunks.append(m3_best.score(batch_queries))
+        
+        # Cosine similarities (both)
+        query_vecs = m3_best.vectorizer_.transform(batch_queries)
+        cos_both_chunks.append((query_vecs @ m3_best.item_matrix_.T).toarray())
+        
+        # Cosine similarities (ingredient-only / M2)
+        cos_ingredient_chunks.append(m2_default.score(batch_queries))
+        
+        # Exact overlap
+        query_binary = binarizer.transform(
+            [[x for x in q if x in vocab_set] for q in batch_queries]
+        ).astype(bool)
+        exact_overlap_chunks.append((query_binary @ recipe_binary.T).astype(float))
+    
+    m3_scores = np.vstack(m3_score_chunks)
+    cos_both = np.vstack(cos_both_chunks)
+    cos_ingredient = np.vstack(cos_ingredient_chunks)
+    exact_overlap = np.vstack(exact_overlap_chunks)
     
     candidates = top_k(m3_scores, n_candidates)
     rows = []
     
-    for q, (query, target) in enumerate(zip(queries, targets)):
+    print(f"Building feature rows for {len(candidates)} candidate pairs...")
+    for q in tqdm(range(n_queries), desc="Queries"):
+        query = queries[q]
+        target = targets[q]
         query_keys = [ingredient_keys(item) for item in query]
         query_key_union = set().union(*query_keys)
         top_score = m3_scores[q, candidates[q, 0]]

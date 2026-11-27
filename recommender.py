@@ -22,9 +22,12 @@ class ItalianRecipeRecommender:
         self.recipes_: list[list[str]] = None
         self.vectorizer_: TfidfVectorizer = None
         self.item_matrix_: csr_matrix = None
-        self.binarizer_ = MultiLabelBinarizer(classes=cfg.vocab)
-        self.recipe_binary_: csr_matrix = None
-        self.knn_jaccard_: NearestNeighbors = None
+        # Sparse matrices for coverage computation (notebook style)
+        self.ingredient_index_: dict[str, int] = None
+        self.key_index_: dict[str, int] = None
+        self.ingredient_keys_: csr_matrix = None
+        self.recipe_ingredients_: csr_matrix = None
+        self.recipe_lengths_: np.ndarray = None
 
     def _analyzer(self, ingredients: list[str]) -> list[str]:
         return to_features(ingredients, self.mode, self.drop_staples)
@@ -38,31 +41,54 @@ class ItalianRecipeRecommender:
         )
         self.item_matrix_ = self.vectorizer_.fit_transform(self.recipes_)
 
-        # Binary matrix for M0/M1 (exact overlap / Jaccard)
-        self.recipe_binary_ = self.binarizer_.fit_transform(self.recipes_).astype(bool)
-        self.knn_jaccard_ = NearestNeighbors(metric="jaccard", algorithm="brute").fit(self.recipe_binary_)
+        # Build sparse matrices for coverage (matching notebook)
+        vocab = sorted({item for items in self.recipes_ for item in items})
+        self.ingredient_index_ = {item: i for i, item in enumerate(vocab)}
+        keys = sorted({key for item in vocab for key in ingredient_keys(item)})
+        self.key_index_ = {key: i for i, key in enumerate(keys)}
+
+        # ingredient -> keys matrix
+        rows, cols = [], []
+        for item, i in self.ingredient_index_.items():
+            for key in ingredient_keys(item):
+                rows.append(i)
+                cols.append(self.key_index_[key])
+        self.ingredient_keys_ = csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(len(vocab), len(keys)))
+
+        # recipe -> ingredients matrix
+        rows, cols = [], []
+        for r, items in enumerate(self.recipes_):
+            for item in set(items):
+                rows.append(r)
+                cols.append(self.ingredient_index_[item])
+        self.recipe_ingredients_ = csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(len(self.recipes_), len(vocab)))
+        self.recipe_lengths_ = np.asarray(self.recipe_ingredients_.sum(axis=1)).ravel()
 
         return self
 
+    def coverage(self, queries: list[list[str]]) -> np.ndarray:
+        rows, cols = [], []
+        for q, items in enumerate(queries):
+            for key in {k for item in items for k in ingredient_keys(item)}:
+                if key in self.key_index_:
+                    rows.append(q)
+                    cols.append(self.key_index_[key])
+        query_keys = csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(len(queries), len(self.key_index_)))
+        available = (query_keys @ self.ingredient_keys_.T) > 0
+        covered = (available.astype(float) @ self.recipe_ingredients_.T).toarray()
+        return covered / self.recipe_lengths_
+
     def score(self, queries: list[list[str]]) -> np.ndarray:
-        query_vecs = self.vectorizer_.transform(queries)
-        return (query_vecs @ self.item_matrix_.T).toarray()
+        similarity = (self.vectorizer_.transform(queries) @ self.item_matrix_.T).toarray()
+        if self.alpha >= 1:
+            return similarity
+        return self.alpha * similarity + (1 - self.alpha) * self.coverage(queries)
 
-    def recommend(self, query: list[str], k: int = 10) -> list[tuple[int, float, float]]:
-        scores = self.score([query])[0]
-        top_idx = np.argsort(-scores)[:k]
-
-        # Coverage: proportion of recipe ingredients user has (soft match)
-        query_keys = {k for item in query for k in ingredient_keys(item)}
-        results = []
-        for idx in top_idx:
-            recipe_items = self.recipes_[idx]
-            owned = sum(1 for item in recipe_items if ingredient_keys(item) & query_keys)
-            coverage = owned / len(recipe_items) if recipe_items else 0.0
-            # Combined score: alpha * cosine + (1 - alpha) * coverage
-            combined = self.alpha * scores[idx] + (1 - self.alpha) * coverage
-            results.append((idx, float(combined), float(coverage)))
-        return results
+    def recommend(self, ingredients: list[str], k: int = 10) -> list[tuple[int, float, float]]:
+        scores = self.score([ingredients])[0]
+        top = np.argsort(-scores)[:k]
+        coverage = self.coverage([ingredients])[0]
+        return [(int(i), float(scores[i]), float(coverage[i])) for i in top]
 
 
 # M0: Exact ingredient overlap (binary)

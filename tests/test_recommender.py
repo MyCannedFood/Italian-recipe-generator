@@ -24,9 +24,11 @@ class TestItalianRecipeRecommender:
         assert m3_model.recipes_ is not None
         assert m3_model.vectorizer_ is not None
         assert m3_model.item_matrix_ is not None
-        assert m3_model.binarizer_ is not None
-        assert m3_model.recipe_binary_ is not None
-        assert m3_model.knn_jaccard_ is not None
+        assert m3_model.ingredient_index_ is not None
+        assert m3_model.key_index_ is not None
+        assert m3_model.ingredient_keys_ is not None
+        assert m3_model.recipe_ingredients_ is not None
+        assert m3_model.recipe_lengths_ is not None
         assert len(m3_model.recipes_) == len(sample_ingredients)
 
     def test_score_returns_array(self, m3_model):

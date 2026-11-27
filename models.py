@@ -43,7 +43,7 @@ def make_preprocessor(scale: bool = False) -> ColumnTransformer:
         ("scale", StandardScaler()) if scale else ("passthrough", "passthrough"),
     ])
     categorical_pipe = Pipeline([
-        ("impute", SimpleImputer(strategy="most_frequent")),
+        ("impute", SimpleImputer(strategy="constant", fill_value="Unknown")),
         ("onehot", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
     ])
     return ColumnTransformer([
