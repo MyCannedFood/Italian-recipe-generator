@@ -1,5 +1,4 @@
 from pathlib import Path
-import json
 import re
 import unicodedata
 import numpy as np
@@ -116,23 +115,28 @@ def to_features(ingredients: list[str], mode: str, drop_staples: bool) -> list[s
 
 
 def load_data() -> None:
-    """Load recipes CSV and build all shared data structures. Call once at startup."""
+    """Load recipes and build all shared data structures. Call once at startup.
+    
+    Requires recipes_italian_filtered.parquet (saved by notebook Cell 19).
+    Run the notebook first to generate this file.
+    """
     global recipes, recipe_ingredients, vocab, vocab_set, ingredient_index, key_index
     global ingredient_keys_matrix, recipe_ingredients_matrix, recipe_lengths, idf, ingredient_frequency
 
     if recipes is not None:
         return  # already loaded
 
-    recipes = pd.read_csv(RECIPES_CSV)
+    parquet_path = Path(__file__).parent / "recipes_italian_filtered.parquet"
+    if not parquet_path.exists():
+        raise FileNotFoundError(
+            f"Preprocessed Italian recipes file not found: {parquet_path}\n"
+            "Run Group3_Italian_Recipe_Recommender.ipynb first (Cell 19 saves recipes_italian_filtered.parquet)"
+        )
 
-    # Normalize ingredient lists
-    def parse_ingredients(s):
-        try:
-            return json.loads(s) if isinstance(s, str) else []
-        except Exception:
-            return []
+    recipes = pd.read_parquet(parquet_path)
+    print(f"Loaded {len(recipes)} Italian recipes from {parquet_path}")
 
-    recipe_ingredients = recipes["ingredients"].apply(parse_ingredients).tolist()
+    recipe_ingredients = recipes["ingredient_list"].tolist()
 
     # Build vocabulary
     vocab = sorted({item for items in recipe_ingredients for item in items})
@@ -169,29 +173,10 @@ def load_data() -> None:
     idf = {item: np.log(n_recipes / count) for item, count in ingredient_frequency.items()}
 
     # --- Derived columns (matching notebook preprocessing) ---
-    # dish_group from subcategory/category
+    # dish_group from subcategory/category (fallback only; normally present in parquet)
     if "dish_group" not in recipes.columns:
-        # Map subcategory to dish group
-        subcat_to_group = {
-            "Antipasti": "Antipasti", "Antipasto": "Antipasti", "Bruschetta": "Antipasti",
-            "Biscotti": "Dessert", "Calzones": "Pizza", "Chicken Parmesan": "Chicken",
-            "Eggplant Parmesan": "Vegetarian", "Fettuccini": "Pasta", "Frittatas": "Eggs",
-            "Gnocchi": "Pasta", "Homemade Pasta": "Pasta", "Lasagna": "Pasta",
-            "Meat Lasagna": "Pasta", "Chicken Lasagna": "Pasta", "Spinach Lasagna": "Pasta",
-            "Vegetarian Lasagna": "Pasta", "Zucchini Lasagna": "Pasta", "Eggplant Lasagna": "Pasta",
-            "Linguine": "Pasta", "Manicotti": "Pasta", "Italian Meatballs": "Meat",
-            "Minestrone Soups": "Soup", "Pasta Carbonara": "Pasta", "Pasta Primavera": "Pasta",
-            "Pestos": "Sauce", "Pizza": "Pizza", "Pepperoni Pizza": "Pizza", "Veggie Pizza": "Pizza",
-        }
-        def map_dish_group(row):
-            subcat = str(row.get("subcategory", "")).strip()
-            if subcat in subcat_to_group:
-                return subcat_to_group[subcat]
-            cat = str(row.get("category", "")).strip()
-            if cat == "Italian":
-                return "Other"
-            return "Other"
-        recipes["dish_group"] = recipes.apply(map_dish_group, axis=1)
+        # All recipes are Italian-filtered, so use subcategory as dish_group
+        recipes["dish_group"] = recipes["subcategory"].fillna("Italian").astype(str).str.strip()
 
     # n_steps from num_steps
     if "n_steps" not in recipes.columns and "num_steps" in recipes.columns:

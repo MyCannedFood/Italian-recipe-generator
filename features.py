@@ -60,7 +60,7 @@ def compute_m4_features(pantry: list[str]) -> pd.DataFrame:
     binarizer = MultiLabelBinarizer(classes=vocab)
     recipe_binary = binarizer.fit_transform(recipe_ingredients).astype(bool)
     query_binary = binarizer.transform([query]).astype(bool)
-    exact_overlap = (query_binary @ recipe_binary.T).toarray()[0]
+    exact_overlap = (query_binary @ recipe_binary.T)[0]
 
     top_score = m3_scores[candidates[0]]
     rows = []

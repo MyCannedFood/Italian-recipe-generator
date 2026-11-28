@@ -124,9 +124,10 @@ def knn_jaccard_top_k(queries: list[list[str]], k: int = 10) -> np.ndarray:
 
 # Default optimized M2/M3 model (parameters from notebook grid search)
 def get_m3_best() -> ItalianRecipeRecommender:
-    # Best params from notebook: mode="both", use_idf=True, drop_staples=False, alpha=0.6
+    # Best params from notebook grid search (Cell 20-22):
+    # mode="both", use_idf=False, drop_staples=False, alpha=1.0
     load_data()  # Ensure data is loaded
-    model = ItalianRecipeRecommender(mode="both", use_idf=True, drop_staples=False, alpha=0.6)
+    model = ItalianRecipeRecommender(mode="both", use_idf=False, drop_staples=False, alpha=1.0)
     model.fit(cfg.recipe_ingredients)
     return model
 
