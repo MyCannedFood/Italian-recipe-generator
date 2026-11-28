@@ -2,6 +2,12 @@ import streamlit as st
 import joblib
 import pandas as pd
 from pathlib import Path
+import sys
+
+# Ensure classes are importable for unpickling model bundle (notebook saves them in __main__)
+sys.path.insert(0, str(Path(__file__).parent))
+from recommender import ItalianRecipeRecommender  # noqa: F401  M3 model class
+from models import GroupTimeImputer  # noqa: F401  M4 pipeline step
 
 # Page config
 st.set_page_config(
@@ -33,8 +39,6 @@ N_CANDIDATES = bundle["N_CANDIDATES"]
 ML_FEATURES = bundle["features"]
 
 # Import after bundle loads (uses config from bundle)
-import sys
-sys.path.insert(0, str(Path(__file__).parent))
 from features import recommend_from_pantry, compute_m4_features
 from config import clean_ingredients_v2, ingredient_keys
 

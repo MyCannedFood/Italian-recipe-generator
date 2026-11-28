@@ -14,24 +14,29 @@ from config import ML_NUMERIC, ML_CATEGORICAL, N_JOBS, RANDOM_STATE
 
 
 class GroupTimeImputer(BaseEstimator):
-    def __init__(self, group_col: str = "dish_group", time_cols: tuple = ("est_prep_time_min", "est_cook_time_min")):
-        self.group_col = group_col
-        self.time_cols = time_cols
+    def __init__(self, columns=("est_prep_time_min", "est_cook_time_min"), group="dish_group"):
+        self.columns = columns
+        self.group = group
         self.group_medians_ = None
         self.global_medians_ = None
 
     def fit(self, X: pd.DataFrame, y=None) -> "GroupTimeImputer":
-        df = X.copy()
-        self.group_medians_ = df.groupby(self.group_col)[list(self.time_cols)].median()
-        self.global_medians_ = df[list(self.time_cols)].median()
+        X = X.copy()
+        self.global_medians_ = X[list(self.columns)].median()
+        self.group_medians_ = X.groupby(self.group, dropna=False)[list(self.columns)].median()
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        df = X.copy()
-        for col in self.time_cols:
-            group_fill = df[self.group_col].map(self.group_medians_[col])
-            df[col] = df[col].fillna(group_fill).fillna(self.global_medians_[col])
-        return df
+        result = X.copy()
+        for column in self.columns:
+            result[column] = (
+                result[column]
+                .fillna(result[self.group].map(self.group_medians_[column]))
+                .fillna(self.global_medians_[column])
+            )
+        if "total_time_min" in result:
+            result["total_time_min"] = result["est_prep_time_min"] + result["est_cook_time_min"]
+        return result
 
     def fit_transform(self, X: pd.DataFrame, y=None) -> pd.DataFrame:
         return self.fit(X).transform(X)
