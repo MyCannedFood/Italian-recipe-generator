@@ -29,7 +29,6 @@ ENV/
 *.swo
 
 # Data
-*.parquet
 *.pkl
 *.model
 *.csv
